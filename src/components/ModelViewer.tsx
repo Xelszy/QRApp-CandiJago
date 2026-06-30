@@ -147,6 +147,64 @@ function Loader() {
   );
 }
 
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; onReset?: () => void },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center p-6 bg-slate-900/95 text-white rounded-2xl border border-slate-800 text-center max-w-md w-full shadow-2xl backdrop-blur-lg">
+          <div className="w-12 h-12 rounded-full bg-rose-500/10 flex items-center justify-center mb-4 border border-rose-500/20">
+            <Landmark className="w-6 h-6 text-rose-500" />
+          </div>
+          <h3 className="text-sm font-semibold tracking-wider text-slate-100 uppercase mb-2">Gagal Memuat Model 3D</h3>
+          <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+            Model 3D ini gagal dimuat karena kendala jaringan atau browser/perangkat Anda tidak mendukung WebGL.
+          </p>
+          <div className="w-full text-left bg-slate-950 p-3 rounded-lg border border-slate-800/80 mb-5 overflow-x-auto max-h-24">
+            <pre className="text-[10px] text-rose-400 font-mono whitespace-pre-wrap leading-normal">
+              {this.state.error?.message || "Unknown rendering or WebGL failure"}
+            </pre>
+          </div>
+          <div className="flex gap-3 w-full">
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                if (this.props.onReset) this.props.onReset();
+              }}
+              className="flex-1 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-lg text-xs font-semibold tracking-wider uppercase border border-slate-700 transition-all cursor-pointer"
+            >
+              Kembali
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="flex-1 py-2 bg-amber-500 hover:bg-amber-400 text-amber-950 rounded-lg text-xs font-bold tracking-wider uppercase transition-all shadow-md active:scale-95 cursor-pointer"
+            >
+              Muat Ulang
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function ARAssetModel({ modelUrl, ...props }: { modelUrl: string; [key: string]: any }) {
   const gltf = useGLTF(`/api/model?url=${encodeURIComponent(modelUrl)}`);
   
@@ -244,19 +302,25 @@ export default function ModelViewer() {
     const canvasElement = document.createElement('canvas');
 
     const scanFrame = () => {
-      const video = videoRef.current;
-      if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
-
-      canvasElement.width = video.videoWidth;
-      canvasElement.height = video.videoHeight;
-      const ctx = canvasElement.getContext('2d');
-      if (!ctx) return;
-
-      ctx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
-      const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
-
       try {
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        const video = videoRef.current;
+        if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+        canvasElement.width = video.videoWidth;
+        canvasElement.height = video.videoHeight;
+        const ctx = canvasElement.getContext('2d');
+        if (!ctx) return;
+
+        ctx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+        const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+
+        const qrDecoder = (jsQR as any)?.default || jsQR;
+        if (typeof qrDecoder !== 'function') {
+          console.warn("jsQR function is not loaded or incorrect default export.");
+          return;
+        }
+
+        const code = qrDecoder(imageData.data, imageData.width, imageData.height, {
           inversionAttempts: "dontInvert"
         });
 
@@ -386,7 +450,13 @@ export default function ModelViewer() {
         ctx.drawImage(imgElement, 0, 0);
         try {
           const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          const qrDecoder = (jsQR as any)?.default || jsQR;
+          if (typeof qrDecoder !== 'function') {
+            console.warn("jsQR function is not loaded or incorrect default export.");
+            return;
+          }
+
+          const code = qrDecoder(imageData.data, imageData.width, imageData.height, {
             inversionAttempts: "dontInvert"
           });
           
@@ -527,29 +597,31 @@ export default function ModelViewer() {
 
       {/* --- 3D CANVAS LAYER --- */}
       <div className={`absolute inset-0 z-10 w-full h-full transition-opacity duration-1000 ${targetDetected ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
-        <div className="w-full h-full pointer-events-auto">
-          <Canvas camera={{ position: [0, 1.2, 3.8], fov: 45 }} gl={{ alpha: true }}>
-            <XR store={store}>
-              <ambientLight intensity={0.65} />
-              <directionalLight position={[10, 10, 5]} intensity={1.5} castShadow />
-              <directionalLight position={[-10, 10, -5]} intensity={0.8} color="#90b0d0" />
-              
-              <Suspense fallback={<Loader />}>
-                {(bgMode === 'camera' || bgMode === 'image') && targetDetected && (
-                  <ARAssetModel modelUrl={selectedAsset.url} />
-                )}
-                <Environment preset="city" />
-                <OrbitControls 
-                  enablePan={false}
-                  enableZoom={true}
-                  enableRotate={true}
-                  minDistance={1.2}
-                  maxDistance={6}
-                  target={[0, 0, 0]}
-                />
-              </Suspense>
-            </XR>
-          </Canvas>
+        <div className="w-full h-full pointer-events-auto flex items-center justify-center">
+          <ErrorBoundary key={selectedAsset.id + "_" + targetDetected} onReset={stopCamera}>
+            <Canvas camera={{ position: [0, 1.2, 3.8], fov: 45 }} gl={{ alpha: true }}>
+              <XR store={store}>
+                <ambientLight intensity={0.65} />
+                <directionalLight position={[10, 10, 5]} intensity={1.5} castShadow />
+                <directionalLight position={[-10, 10, -5]} intensity={0.8} color="#90b0d0" />
+                
+                <Suspense fallback={<Loader />}>
+                  {(bgMode === 'camera' || bgMode === 'image') && targetDetected && (
+                    <ARAssetModel modelUrl={selectedAsset.url} />
+                  )}
+                  <Environment preset="city" />
+                  <OrbitControls 
+                    enablePan={false}
+                    enableZoom={true}
+                    enableRotate={true}
+                    minDistance={1.2}
+                    maxDistance={6}
+                    target={[0, 0, 0]}
+                  />
+                </Suspense>
+              </XR>
+            </Canvas>
+          </ErrorBoundary>
         </div>
       </div>
       

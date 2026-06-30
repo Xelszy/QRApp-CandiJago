@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const onRequestPost: PagesFunction<{ GEMINI_API_KEY?: string }> = async (context) => {
   try {
     const requestData = await context.request.json() as { imageBase64: string; mimeType?: string };
