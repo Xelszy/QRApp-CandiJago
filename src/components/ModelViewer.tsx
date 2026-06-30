@@ -205,8 +205,33 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-function ARAssetModel({ modelUrl, ...props }: { modelUrl: string; [key: string]: any }) {
-  const gltf = useGLTF(`/api/model?url=${encodeURIComponent(modelUrl)}`);
+let isProxyAvailableCache: boolean | null = null;
+
+async function checkProxyAvailability(): Promise<boolean> {
+  if (isProxyAvailableCache !== null) return isProxyAvailableCache;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch("/api/model?ping=1", { signal: controller.signal });
+    clearTimeout(timeoutId);
+    
+    if (res.ok) {
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        isProxyAvailableCache = !!(data && data.status === "ok");
+        return isProxyAvailableCache;
+      }
+    }
+    isProxyAvailableCache = false;
+  } catch (e) {
+    isProxyAvailableCache = false;
+  }
+  return isProxyAvailableCache;
+}
+
+function ARAssetModelLoader({ resolvedUrl, ...props }: { resolvedUrl: string; [key: string]: any }) {
+  const gltf = useGLTF(resolvedUrl);
   
   const modelData = React.useMemo(() => {
     if (!gltf) return null;
@@ -238,7 +263,7 @@ function ARAssetModel({ modelUrl, ...props }: { modelUrl: string; [key: string]:
       center,
       scaleFactor
     };
-  }, [gltf, modelUrl]);
+  }, [gltf]);
 
   if (!modelData) return null;
 
@@ -251,6 +276,31 @@ function ARAssetModel({ modelUrl, ...props }: { modelUrl: string; [key: string]:
       </group>
     </group>
   );
+}
+
+function ARAssetModel({ modelUrl, ...props }: { modelUrl: string; [key: string]: any }) {
+  const [resolvedUrl, setResolvedUrl] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let active = true;
+    async function determineUrl() {
+      const isProxyAvailable = await checkProxyAvailability();
+      if (!active) return;
+      if (isProxyAvailable) {
+        setResolvedUrl(`/api/model?url=${encodeURIComponent(modelUrl)}#model.glb`);
+      } else {
+        setResolvedUrl(modelUrl);
+      }
+    }
+    determineUrl();
+    return () => {
+      active = false;
+    };
+  }, [modelUrl]);
+
+  if (!resolvedUrl) return null;
+
+  return <ARAssetModelLoader resolvedUrl={resolvedUrl} {...props} />;
 }
 
 export default function ModelViewer() {
@@ -306,13 +356,27 @@ export default function ModelViewer() {
         const video = videoRef.current;
         if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
 
-        canvasElement.width = video.videoWidth;
-        canvasElement.height = video.videoHeight;
+        // Downscale camera frame for performance and low memory footprint on mobile devices
+        let width = video.videoWidth;
+        let height = video.videoHeight;
+        const maxDimension = 480;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        canvasElement.width = width;
+        canvasElement.height = height;
         const ctx = canvasElement.getContext('2d');
         if (!ctx) return;
 
-        ctx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
-        const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+        ctx.drawImage(video, 0, 0, width, height);
+        const imageData = ctx.getImageData(0, 0, width, height);
 
         const qrDecoder = (jsQR as any)?.default || jsQR;
         if (typeof qrDecoder !== 'function') {
@@ -443,13 +507,28 @@ export default function ModelViewer() {
     imgElement.crossOrigin = "anonymous";
     imgElement.onload = () => {
       const canvasElement = document.createElement('canvas');
-      canvasElement.width = imgElement.width;
-      canvasElement.height = imgElement.height;
+      
+      // Downscale uploaded image for safe local QR decoding
+      let width = imgElement.width;
+      let height = imgElement.height;
+      const maxDimension = 640;
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      canvasElement.width = width;
+      canvasElement.height = height;
       const ctx = canvasElement.getContext('2d');
       if (ctx) {
-        ctx.drawImage(imgElement, 0, 0);
+        ctx.drawImage(imgElement, 0, 0, width, height);
         try {
-          const imageData = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height);
+          const imageData = ctx.getImageData(0, 0, width, height);
           const qrDecoder = (jsQR as any)?.default || jsQR;
           if (typeof qrDecoder !== 'function') {
             console.warn("jsQR function is not loaded or incorrect default export.");

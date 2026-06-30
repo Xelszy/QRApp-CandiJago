@@ -12,6 +12,9 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
 
   app.get("/api/model", async (req, res) => {
+    if (req.query.ping) {
+      return res.json({ status: "ok" });
+    }
     try {
       const defaultUrl = "https://www.modelscope.ai/datasets/Xelszy/website/resolve/master/candijago1.glb";
       const targetUrl = (req.query.url as string) || defaultUrl;

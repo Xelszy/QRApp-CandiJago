@@ -1,6 +1,17 @@
 // @ts-nocheck
 export const onRequestGet: PagesFunction = async (context) => {
   const url = new URL(context.request.url);
+  
+  if (url.searchParams.has("ping")) {
+    return new Response(JSON.stringify({ status: "ok" }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  }
+
   const defaultUrl = "https://www.modelscope.ai/datasets/Xelszy/website/resolve/master/candijago1.glb";
   const targetUrl = url.searchParams.get("url") || defaultUrl;
 
