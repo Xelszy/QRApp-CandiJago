@@ -1,0 +1,6 @@
+{
+  "name": "Candi Jago WebAR",
+  "description": "A 3D Model viewer and WebAR application for Candi Jago. Includes scaffolding for the Native Android APK.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
